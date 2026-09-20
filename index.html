@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Biométrico</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+
+body{
+    background:#f2f2f2;
+}
+
+.digital-clock{
+    width:400px;
+    height:70px;
+    margin:auto;
+    color:#fff;
+    border-radius:10px;
+    text-align:center;
+    font-size:60px;
+    background:linear-gradient(90deg,#000,#555);
+    text-shadow:0 0 10px yellow;
+}
+
+#webcam{
+    width:100%;
+    max-width:500px;
+    border-radius:20px;
+    background:black;
+    border:4px solid #0d6efd;
+}
+
+.loader-wrapper{
+    position:fixed;
+    z-index:9999;
+    background:white;
+    left:0;
+    top:0;
+    width:100%;
+    height:100%;
+    display:none;
+}
+
+.loader{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="loader-wrapper">
+    <div class="loader">
+        <div class="spinner-border text-primary"></div>
+    </div>
+</div>
+
+<div class="container mt-5">
+
+    <div class="row justify-content-center">
+
+        <div class="col-md-7">
+
+            <div id="alert_asistencia"></div>
+
+            <div class="digital-clock mb-4">
+                00:00:00
+            </div>
+
+            <div class="input-group mb-4">
+                <span class="input-group-text">
+                    ID Empleado
+                </span>
+
+                <input
+                    type="text"
+                    class="form-control"
+                    id="documento"
+                    placeholder="Ingrese ID Empleado"
+                >
+            </div>
+
+            <div class="text-center mb-4">
+
+                <video id="webcam" autoplay playsinline></video>
+
+                <canvas id="canvas" style="display:none;"></canvas>
+
+            </div>
+
+            <div class="text-center">
+
+                <button class="btn btn-primary"
+                        id="btn_entrada">
+                    Entrada
+                </button>
+
+                <button class="btn btn-danger"
+                        id="btn_salida">
+                    Salida
+                </button>
+
+            </div>
+
+            <input type="hidden" id="posicion">
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+// ⚠️ IMPORTANTE: reemplaza esta URL por la de TU implementación de Apps Script
+// (Implementar > Administrar implementaciones > copiar la URL que termina en /exec)
+const API_URL =
+"https://script.google.com/macros/s/AKfycbyYl1f9uRmh6CWFAt5zk7aJ7NKQDL4yLEnltx3KaN1JROlMvo3k2lO1lgzKTIusIwAlSw/exec";
+
+let stream;
+let configuracion = {
+    biometria:"N",
+    geolocalizacion:"N"
+};
+
+const video = document.getElementById("webcam");
+const canvas = document.getElementById("canvas");
+
+function mostrarLoader(){
+    document.querySelector(".loader-wrapper").style.display="block";
+}
+
+function ocultarLoader(){
+    document.querySelector(".loader-wrapper").style.display="none";
+}
+
+function mostrarMensaje(texto,tipo){
+
+    const div = document.getElementById("alert_asistencia");
+
+    div.className =
+        tipo=="success"
+        ? "alert alert-success"
+        : "alert alert-danger";
+
+    div.innerHTML = texto;
+
+}
+
+async function iniciarCamara(){
+
+    try{
+
+        stream = await navigator.mediaDevices.getUserMedia({
+            video:{
+                width:640,
+                height:480,
+                facingMode:"user"
+            },
+            audio:false
+        });
+
+        video.srcObject = stream;
+
+    }catch(err){
+
+        mostrarMensaje(
+            "No se pudo acceder a la cámara",
+            "error"
+        );
+
+        console.log(err);
+
+    }
+
+}
+
+function tomarFoto(){
+
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    ctx.drawImage(video,0,0);
+
+    return canvas.toDataURL("image/jpeg");
+
+}
+
+async function obtenerConfiguracion(){
+
+    mostrarLoader();
+
+    try{
+
+        const response = await fetch(API_URL,{
+            method:"POST",
+            body:JSON.stringify({
+                action:"obtenerconfiguracion"
+            })
+        });
+
+        if(!response.ok){
+            throw new Error("HTTP "+response.status);
+        }
+
+        const data = await response.json();
+
+        configuracion = data.configuracion;
+
+        if(configuracion.biometria=="S"){
+            iniciarCamara();
+        }
+
+        if(configuracion.geolocalizacion=="S"){
+            obtenerUbicacion();
+        }
+
+    }catch(err){
+
+        mostrarMensaje(
+            "No se pudo conectar con el servidor. Verifica que API_URL apunte a tu Web App (/exec) y que la implementación esté activa.",
+            "error"
+        );
+
+        console.log(err);
+
+    }finally{
+
+        ocultarLoader();
+
+    }
+
+}
+
+function obtenerUbicacion(){
+
+    navigator.geolocation.getCurrentPosition(
+        (position)=>{
+
+            document.getElementById("posicion").value =
+                position.coords.latitude +
+                "," +
+                position.coords.longitude;
+
+        },
+        (err)=>{
+
+            mostrarMensaje(
+                "No se pudo obtener tu ubicación. Actívala e intenta de nuevo.",
+                "error"
+            );
+
+            console.log(err);
+
+        }
+    );
+
+}
+
+async function registrar(tipo){
+
+    const documento =
+        document.getElementById("documento").value;
+
+    if(!documento){
+
+        mostrarMensaje(
+            "Ingrese documento",
+            "error"
+        );
+
+        return;
+    }
+
+    mostrarLoader();
+
+    try{
+
+        let foto = "";
+
+        if(configuracion.biometria=="S"){
+            foto = tomarFoto();
+        }
+
+        const payload = {
+            op:"asistencia",
+            documento:documento,
+            horario:tipo,
+            posicion:document.getElementById("posicion").value,
+            foto:foto
+        };
+
+        const response = await fetch(API_URL,{
+            method:"POST",
+            body:JSON.stringify({
+                action:"registrarasistencia",
+                payload:payload
+            })
+        });
+
+        if(!response.ok){
+            throw new Error("HTTP "+response.status);
+        }
+
+        const data = await response.json();
+
+        if(data.status=="0"){
+
+            mostrarMensaje(
+                data.message,
+                "success"
+            );
+
+            document.getElementById("documento").value="";
+
+        }else{
+
+            mostrarMensaje(
+                data.message,
+                "error"
+            );
+
+        }
+
+    }catch(err){
+
+        mostrarMensaje(
+            "Ocurrió un error al registrar la asistencia. Verifica tu conexión y la URL del Web App.",
+            "error"
+        );
+
+        console.log(err);
+
+    }finally{
+
+        ocultarLoader();
+
+    }
+
+}
+
+document.getElementById("btn_entrada")
+.addEventListener("click",()=>{
+
+    registrar("entrada");
+
+});
+
+document.getElementById("btn_salida")
+.addEventListener("click",()=>{
+
+    registrar("salida");
+
+});
+
+function actualizarReloj(){
+
+    const date = new Date();
+
+    let h = date.getHours();
+    let m = date.getMinutes();
+    let s = date.getSeconds();
+
+    h = h < 10 ? "0"+h : h;
+    m = m < 10 ? "0"+m : m;
+    s = s < 10 ? "0"+s : s;
+
+    document.querySelector(".digital-clock")
+    .innerHTML = `${h}:${m}:${s}`;
+
+}
+
+setInterval(actualizarReloj,1000);
+
+actualizarReloj();
+
+obtenerConfiguracion();
+
+</script>
+
+</body>
+</html>
